@@ -45,14 +45,7 @@ public sealed class MinecraftServerPing
             int jsonLength = ReadVarInt();
 
             var json = ReadString(jsonLength);
-            var result = JsonConvert.DeserializeObject<PingPayload>(json);
-
-            if (result is null)
-            {
-                throw new Exception("Could not read the json response.");
-            }
-
-            return result;
+            return JsonConvert.DeserializeObject<PingPayload>(json) ?? throw new Exception("Could not read the json response.");
         }
         finally
         {

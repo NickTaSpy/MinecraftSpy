@@ -1,24 +1,25 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using MinecraftSpy;
+using Newtonsoft.Json;
 
 await Host.CreateDefaultBuilder()
     .UseConsoleLifetime()
-    .ConfigureServices((_, services) =>
+    .ConfigureServices((hostBuilder, services) =>
     {
-        services.AddSingleton(new Settings
+        services.AddSingleton(hostBuilder.Configuration.GetSection("BotSettings").Get<Settings>() ?? new Settings());
+
+        var secrets = JsonConvert.DeserializeObject<AppSecrets>(File.ReadAllText(Constants.FILE_SECRETS));
+
+        if (secrets is null)
         {
-            DiscordToken = Environment.GetEnvironmentVariable(Constants.ENV_DISCORD_TOKEN)
-                ?? throw new Exception("Missing configuration " + Constants.ENV_DISCORD_TOKEN),
-            MinecraftIP = Environment.GetEnvironmentVariable(Constants.ENV_MINECRAFT_IP)
-                ?? throw new Exception("Missing configuration " + Constants.ENV_MINECRAFT_IP),
-            MinecraftPort = short.Parse(Environment.GetEnvironmentVariable(Constants.ENV_MINECRAFT_PORT)
-                ?? throw new Exception("Missing configuration " + Constants.ENV_MINECRAFT_PORT)),
-            DiscordChannelID = ulong.Parse(Environment.GetEnvironmentVariable(Constants.ENV_DISCORD_CHANNEL_ID)
-                ?? throw new Exception("Missing configuration " + Constants.ENV_DISCORD_CHANNEL_ID)),
-            DiscordMessageID = ulong.Parse(Environment.GetEnvironmentVariable(Constants.ENV_DISCORD_MESSAGE_ID)
-                ?? throw new Exception("Missing configuration " + Constants.ENV_DISCORD_MESSAGE_ID)),
-        });
+            Console.WriteLine("Could not load " + Constants.FILE_SECRETS);
+            Environment.Exit(0);
+        }
+
+        services.AddSingleton(secrets);
 
         //services.AddHttpClient(Constants.HTTP_CLIENT_PTERODACTYL)
         //    .ConfigureHttpClient(c =>
@@ -30,8 +31,16 @@ await Host.CreateDefaultBuilder()
         //            Environment.GetEnvironmentVariable(Constants.ENV_PTERODACTYL_KEY) ??
         //                throw new Exception(Constants.ENV_PTERODACTYL_KEY + " is not available."));
         //    });
-
         //services.AddSingleton<PterodactylService>();
+
+        if (string.IsNullOrEmpty(secrets.BotDb))
+        {
+            Console.WriteLine(secrets.BotDb + " hasn't been set.");
+            Environment.Exit(0);
+        }
+
+        services.AddDbContext<DatabaseContext>(options => options.UseMySql(secrets.BotDb, ServerVersion.AutoDetect(secrets.BotDb)));
+
         services.AddHostedService<BotService>();
     })
     .RunConsoleAsync();
