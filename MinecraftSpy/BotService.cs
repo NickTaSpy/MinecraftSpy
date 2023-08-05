@@ -3,7 +3,6 @@ using DSharpPlus.EventArgs;
 using DSharpPlus.Exceptions;
 using DSharpPlus.SlashCommands;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -12,17 +11,18 @@ namespace MinecraftSpy;
 public sealed class BotService : BackgroundService
 {
     private readonly ILogger<BotService> _logger;
-    private readonly IServiceProvider _serviceProvider;
     private readonly Settings _settings;
     private readonly DiscordClient _client;
     private readonly MinecraftServerPing _pinger = new();
-    private readonly IServiceScope _serviceScope;
-    private readonly DatabaseContext _dbContext;
+    private readonly IDbContextFactory<DatabaseContext> _dbFactory;
 
-    public BotService(ILogger<BotService> logger, IServiceProvider serviceProvider, Settings settings, AppSecrets secrets)
+    public BotService(
+        ILogger<BotService> logger,
+        IServiceProvider serviceProvider,
+        Settings settings, AppSecrets secrets,
+        IDbContextFactory<DatabaseContext> dbFactory)
     {
         _logger = logger;
-        _serviceProvider = serviceProvider;
         _settings = settings;
         _client = new(new()
         {
@@ -30,9 +30,7 @@ public sealed class BotService : BackgroundService
             TokenType = TokenType.Bot,
             Intents = DiscordIntents.AllUnprivileged
         });
-
-        _serviceScope = _serviceProvider.CreateScope();
-        _dbContext = _serviceScope.ServiceProvider.GetRequiredService<DatabaseContext>();
+        _dbFactory = dbFactory;
 
         var slash = _client.UseSlashCommands(new SlashCommandsConfiguration { Services = serviceProvider });
         slash.RegisterCommands<SlashCommands>();
@@ -51,8 +49,6 @@ public sealed class BotService : BackgroundService
 
         _logger.LogInformation("Discord bot disconnecting.");
         await _client.DisconnectAsync();
-
-        _serviceScope?.Dispose();
     }
 
     private void AddEvents()
@@ -88,7 +84,9 @@ public sealed class BotService : BackgroundService
     {
         _logger.LogInformation("Starting pinging minecraft servers.");
 
-        var subs = await _dbContext.Subscriptions.ToArrayAsync(ct);
+        using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var subs = await db.Subscriptions.ToArrayAsync(ct);
 
         foreach (var sub in subs)
         {
@@ -102,41 +100,45 @@ public sealed class BotService : BackgroundService
             }
             catch (NotFoundException)
             {
-                _dbContext.Subscriptions.Remove(sub);
-                await _dbContext.SaveChangesAsync(ct);
+                db.Subscriptions.Remove(sub);
                 _logger.LogInformation("Removed subscription because the discord message could not be found.");
             }
         }
 
+        await db.SaveChangesAsync(ct);
         _logger.LogInformation("Finished pinging minecraft servers.");
     }
 
     private async Task OnMessageDeleted(DiscordClient sender, MessageDeleteEventArgs args)
     {
-        var sub = await _dbContext.Subscriptions
+        using var db = await _dbFactory.CreateDbContextAsync();
+
+        var sub = await db.Subscriptions
             .Where(x => x.MessageID == args.Message.Id)
             .FirstOrDefaultAsync();
 
         if (sub is not null)
         {
-            _dbContext.Subscriptions.Remove(sub);
-            await _dbContext.SaveChangesAsync();
+            db.Subscriptions.Remove(sub);
+            await db.SaveChangesAsync();
             _logger.LogInformation("Removed subscription because the discord message was deleted.");
         }
     }
 
     private async Task OnMessagesBulkDeleted(DiscordClient sender, MessageBulkDeleteEventArgs args)
     {
+        using var db = await _dbFactory.CreateDbContextAsync();
+
         var messageIds = args.Messages.Select(x => x.Id).ToArray();
 
-        var subs = await _dbContext.Subscriptions
+        var subs = await db.Subscriptions
             .Where(x => messageIds.Contains(x.MessageID))
             .ToListAsync();
 
         if (subs.Any())
         {
-            _dbContext.Subscriptions.RemoveRange(subs);
-            await _dbContext.SaveChangesAsync();
+            db.Subscriptions.RemoveRange(subs);
+            await db.SaveChangesAsync();
             _logger.LogInformation("Removed subscriptions because the discord messages were deleted.");
         }
     }

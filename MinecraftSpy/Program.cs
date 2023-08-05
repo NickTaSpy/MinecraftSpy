@@ -39,7 +39,7 @@ await Host.CreateDefaultBuilder()
             Environment.Exit(0);
         }
 
-        services.AddDbContext<DatabaseContext>(options => options.UseMySql(secrets.BotDb, ServerVersion.AutoDetect(secrets.BotDb)));
+        services.AddDbContextFactory<DatabaseContext>(options => options.UseMySql(secrets.BotDb, ServerVersion.AutoDetect(secrets.BotDb)));
 
         services.AddHostedService<BotService>();
     })
