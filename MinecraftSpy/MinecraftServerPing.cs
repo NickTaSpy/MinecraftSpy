@@ -19,6 +19,7 @@ public sealed class MinecraftServerPing
 
         using var client = new TcpClient();
         await client.ConnectAsync(host, port, ct);
+        ct.ThrowIfCancellationRequested();
         using var stream = client.GetStream();
 
         // Handshake
@@ -34,6 +35,7 @@ public sealed class MinecraftServerPing
 
         // Response
         await stream.ReadAsync(_buffer, ct);
+        ct.ThrowIfCancellationRequested();
 
         int length = ReadVarInt();
         int packet = ReadVarInt();
@@ -114,6 +116,7 @@ public sealed class MinecraftServerPing
         }
 
         ClearBuffer();
+        ct.ThrowIfCancellationRequested();
     }
 
     private void ClearBuffer()
