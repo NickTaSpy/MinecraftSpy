@@ -10,9 +10,6 @@ public sealed class MinecraftServerPing
     private static readonly byte[] _id = new byte[] { 0x00 };
     private static readonly byte[] _localAddress = Encoding.UTF8.GetBytes("localhost");
 
-    private TcpClient? _client;
-    private NetworkStream? _stream;
-
     private readonly byte[] _buffer = new byte[short.MaxValue];
     private int _offset;
 
@@ -20,37 +17,30 @@ public sealed class MinecraftServerPing
     {
         ClearBuffer();
 
-        try
-        {
-            _client = new TcpClient();
-            await _client.ConnectAsync(host, port, ct);
-            _stream = _client.GetStream();
+        using var client = new TcpClient();
+        await client.ConnectAsync(host, port, ct);
+        using var stream = client.GetStream();
 
-            // Handshake
-            WriteVarInt(760);
-            WriteVarInt(_localAddress.Length);
-            WriteBytes(_localAddress);
-            WriteShort(port);
-            WriteVarInt(1);
-            await Flush(ct);
+        // Handshake
+        WriteVarInt(760);
+        WriteVarInt(_localAddress.Length);
+        WriteBytes(_localAddress);
+        WriteShort(port);
+        WriteVarInt(1);
+        await Flush(stream, ct);
 
-            // Status Request
-            await Flush(ct);
+        // Status Request
+        await Flush(stream, ct);
 
-            // Response
-            await _stream.ReadAsync(_buffer, ct);
+        // Response
+        await stream.ReadAsync(_buffer, ct);
 
-            int length = ReadVarInt();
-            int packet = ReadVarInt();
-            int jsonLength = ReadVarInt();
+        int length = ReadVarInt();
+        int packet = ReadVarInt();
+        int jsonLength = ReadVarInt();
 
-            var json = ReadString(jsonLength);
-            return JsonConvert.DeserializeObject<PingPayload>(json) ?? throw new Exception("Could not read the json response.");
-        }
-        finally
-        {
-            _client?.Dispose();
-        }
+        var json = ReadString(jsonLength);
+        return JsonConvert.DeserializeObject<PingPayload>(json) ?? throw new Exception("Could not read the json response.");
     }
 
     #region Read/Write methods
@@ -97,8 +87,8 @@ public sealed class MinecraftServerPing
     {
         while ((value & 128) != 0)
         {
-            WriteByte((byte)(value & 127 | 128));
-            value = (int)((uint)value) >> 7;
+            WriteByte((byte)((value & 127) | 128));
+            value = (int)(uint)value >> 7;
         }
         WriteByte((byte)value);
     }
@@ -109,23 +99,18 @@ public sealed class MinecraftServerPing
         WriteByte((byte)((value >> 8) & 0xFF));
     }
 
-    private async Task Flush(CancellationToken ct = default)
+    private async Task Flush(NetworkStream stream, CancellationToken ct = default)
     {
-        if (!_client.Connected || _stream is null)
-        {
-            throw new InvalidOperationException("The TCP client is not connected or the stream is unavailable.");
-        }
-
         int requestOffset = _offset;
         WriteVarInt(requestOffset + _id.Length);
         int lengthOffset = _offset;
 
-        await _stream.WriteAsync(_buffer.AsMemory(requestOffset, lengthOffset - requestOffset), ct);
-        await _stream.WriteAsync(_id, ct);
+        await stream.WriteAsync(_buffer.AsMemory(requestOffset, lengthOffset - requestOffset), ct);
+        await stream.WriteAsync(_id, ct);
 
         if (requestOffset > 0)
         {
-            await _stream.WriteAsync(_buffer.AsMemory(0, requestOffset), ct);
+            await stream.WriteAsync(_buffer.AsMemory(0, requestOffset), ct);
         }
 
         ClearBuffer();
