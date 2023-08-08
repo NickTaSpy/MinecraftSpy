@@ -13,6 +13,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
     .Enrich.FromLogContext()
     .WriteTo.Console()
+    .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day, rollOnFileSizeLimit: true, retainedFileCountLimit: 15)
     .CreateLogger();
 
 try
@@ -25,14 +26,8 @@ try
         {
             services.AddSingleton(hostBuilder.Configuration.GetSection("BotSettings").Get<Settings>() ?? new Settings());
 
-            var secrets = JsonConvert.DeserializeObject<AppSecrets>(File.ReadAllText(Constants.FILE_SECRETS));
-
-            if (secrets is null)
-            {
-                Console.WriteLine("Could not load " + Constants.FILE_SECRETS);
-                Environment.Exit(0);
-            }
-
+            var secrets = JsonConvert.DeserializeObject<AppSecrets>(File.ReadAllText(Constants.FILE_SECRETS))
+                ?? throw new Exception("Could not load " + Constants.FILE_SECRETS);
             services.AddSingleton(secrets);
 
             //services.AddHttpClient(Constants.HTTP_CLIENT_PTERODACTYL)
@@ -49,8 +44,7 @@ try
 
             if (string.IsNullOrEmpty(secrets.BotDb))
             {
-                Console.WriteLine(secrets.BotDb + " hasn't been set.");
-                Environment.Exit(0);
+                throw new Exception(secrets.BotDb + " hasn't been set.");
             }
 
             services.AddDbContextFactory<DatabaseContext>(options => options.UseMySql(secrets.BotDb, ServerVersion.AutoDetect(secrets.BotDb)));
