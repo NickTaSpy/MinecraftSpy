@@ -5,6 +5,8 @@ using DSharpPlus.SlashCommands;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using System.Net.Sockets;
 
 namespace MinecraftSpy;
 
@@ -90,18 +92,36 @@ public sealed class BotService : BackgroundService
 
         foreach (var sub in subs)
         {
+            if (ct.IsCancellationRequested)
+            {
+                break;
+            }
+
             try
             {
                 var channel = await _client.GetChannelAsync(sub.ChannelID);
                 var message = await channel.GetMessageAsync(sub.MessageID);
 
-                var pingResult = await _pinger.Ping(sub.ServerAddress, sub.ServerPort, ct);
-                await message.ModifyAsync("", pingResult.ToDiscordEmbed(sub.ServerAddress, sub.ServerPort));
+                PingPayload pingResult;
+
+                try
+                {
+                    pingResult = await _pinger.Ping(sub.ServerAddress, sub.ServerPort, ct);
+                }
+                catch (SocketException ex)
+                {
+                    await message.ModifyAsync("", Embeds.CreateErrorDiscordEmbed(sub.ServerAddress, sub.ServerPort));
+                    _logger.LogError(ex, "Could not ping server. | Subscription: {subscription}", JsonConvert.SerializeObject(sub));
+                    continue;
+                }
+
+                await message.ModifyAsync("", Embeds.CreateDiscordEmbed(pingResult, sub.ServerAddress, sub.ServerPort));
             }
             catch (NotFoundException)
             {
                 db.Subscriptions.Remove(sub);
-                _logger.LogInformation("Removed subscription because the discord message could not be found.");
+                _logger.LogInformation("Removed subscription because the discord message could not be found. | Subscription: {subscription}",
+                    JsonConvert.SerializeObject(sub));
             }
         }
 
@@ -121,7 +141,8 @@ public sealed class BotService : BackgroundService
         {
             db.Subscriptions.Remove(sub);
             await db.SaveChangesAsync();
-            _logger.LogInformation("Removed subscription because the discord message was deleted.");
+            _logger.LogInformation("Removed subscription because the discord message was deleted. | Subscription: {subscription}",
+                JsonConvert.SerializeObject(sub));
         }
     }
 
@@ -139,7 +160,8 @@ public sealed class BotService : BackgroundService
         {
             db.Subscriptions.RemoveRange(subs);
             await db.SaveChangesAsync();
-            _logger.LogInformation("Removed subscriptions because the discord messages were deleted.");
+            _logger.LogInformation("Removed subscriptions because the discord messages were deleted. | Subscriptions: {subscriptions}",
+                JsonConvert.SerializeObject(subs));
         }
     }
 }

@@ -2,6 +2,7 @@
 using DSharpPlus.SlashCommands;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Net;
 
 namespace MinecraftSpy;
 
@@ -24,6 +25,15 @@ public class SlashCommands : ApplicationCommandModule
     {
         await ctx.DeferAsync();
 
+        if (port is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+        {
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder()
+                .WithContent($"Invalid port! The range is [{IPEndPoint.MinPort}, {IPEndPoint.MaxPort}]"));
+
+            _logger.LogInformation("Declined subscription for invalid port. Address: {address}, Port: {port}, Channel: {channel}", address, port, ctx.Channel.Name);
+            return;
+        }
+
         var channelId = ctx.Channel.Id;
 
         var sub = await _dbContext.Subscriptions
@@ -35,7 +45,7 @@ public class SlashCommands : ApplicationCommandModule
             await ctx.EditResponseAsync(new DiscordWebhookBuilder()
                 .WithContent("This channel already has a subscription for this server. Delete it before subscribing again."));
 
-            _logger.LogInformation("Declined subscription. Address: {address}, Port: {port}, Channel: {channel}", address, port, ctx.Channel.Name);
+            _logger.LogInformation("Declined duplicate subscription. Address: {address}, Port: {port}, Channel: {channel}", address, port, ctx.Channel.Name);
             return;
         }
 
