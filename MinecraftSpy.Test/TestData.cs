@@ -4,8 +4,8 @@ namespace MinecraftSpy.Test;
 
 public class TestData
 {
-    [JsonProperty("IP")]
-    public string IP { get; set; }
+    [JsonProperty("Address")]
+    public string Address { get; set; }
 
     [JsonProperty("Port")]
     public short Port { get; set; }

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Net;
 
 namespace MinecraftSpy;
 
@@ -18,6 +19,9 @@ public class Subscription
 
     [Column("server_address")]
     public required string ServerAddress { get; set; }
+
+    [NotMapped]
+    public IPAddress[]? ResolvedServerAddresses { get; set; }
 
     [Column("server_port")]
     public required short ServerPort { get; set; }

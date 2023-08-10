@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using System.Net;
 using System.Net.Sockets;
 
 namespace MinecraftSpy;
@@ -88,14 +89,11 @@ public sealed class BotService : BackgroundService
     {
         _logger.LogInformation("Starting pinging minecraft servers.");
 
-        Subscription[] subs;
+        var subsPerConnection = (await GetSubscriptions(ct)).ToArray();
 
-        using (var db = await _dbFactory.CreateDbContextAsync(ct))
-        {
-            subs = await db.Subscriptions.ToArrayAsync(ct);
-        }
+        _logger.LogInformation("Calculated {connCount} connections to ping.", subsPerConnection.Length);
 
-        await Parallel.ForEachAsync(subs, ct, async (sub, ct) =>
+        await Parallel.ForEachAsync(subsPerConnection, ct, async (connSubs, ct) =>
         {
             if (ct.IsCancellationRequested)
             {
@@ -104,34 +102,50 @@ public sealed class BotService : BackgroundService
 
             try
             {
-                var channel = await _client.GetChannelAsync(sub.ChannelID);
-                var message = await channel.GetMessageAsync(sub.MessageID);
-
-                PingPayload pingResult;
+                PingPayload? pingResult;
 
                 try
                 {
-                    pingResult = await new MinecraftServerPing().Ping(sub.ServerAddress, sub.ServerPort, ct);
+                    pingResult = await new MinecraftServerPing().Ping(connSubs.Key.Addresses, connSubs.Key.Port, ct);
                 }
                 catch (SocketException ex)
                 {
-                    await message.ModifyAsync("", Embeds.CreateErrorDiscordEmbed(sub.ServerAddress, sub.ServerPort));
-                    _logger.LogError(ex, "Could not ping server. | Subscription: {subscription}", JsonConvert.SerializeObject(sub));
+                    _logger.LogError(ex, "Could not ping server. | Connection: {connection}", JsonConvert.SerializeObject(connSubs.Key));
                     return;
                 }
 
-                await message.ModifyAsync("", Embeds.CreateDiscordEmbed(pingResult, sub.ServerAddress, sub.ServerPort));
-            }
-            catch (NotFoundException)
-            {
-                using (var db = await _dbFactory.CreateDbContextAsync(ct))
+                foreach (var sub in connSubs)
                 {
-                    db.Subscriptions.Remove(sub);
-                    await db.SaveChangesAsync(ct);
-                }
+                    if (ct.IsCancellationRequested)
+                    {
+                        return;
+                    }
 
-                _logger.LogInformation("Removed subscription because the discord message could not be found. | Subscription: {subscription}",
-                    JsonConvert.SerializeObject(sub));
+                    try
+                    {
+                        var channel = await _client.GetChannelAsync(sub.ChannelID);
+                        var message = await channel.GetMessageAsync(sub.MessageID);
+
+                        if (pingResult is null)
+                        {
+                            await message.ModifyAsync("", Embeds.CreateErrorDiscordEmbed(sub.ServerAddress, sub.ServerPort));
+                            continue;
+                        }
+
+                        await message.ModifyAsync("", Embeds.CreateDiscordEmbed(pingResult, sub.ServerAddress, sub.ServerPort));
+                    }
+                    catch (NotFoundException)
+                    {
+                        using (var db = await _dbFactory.CreateDbContextAsync(ct))
+                        {
+                            db.Subscriptions.Remove(sub);
+                            await db.SaveChangesAsync(ct);
+                        }
+
+                        _logger.LogInformation("Removed subscription because the discord message could not be found. | Subscription: {subscription}",
+                            JsonConvert.SerializeObject(connSubs));
+                    }
+                }
             }
             catch (OperationCanceledException)
             {
@@ -139,6 +153,25 @@ public sealed class BotService : BackgroundService
         });
 
         _logger.LogInformation("Finished pinging minecraft servers.");
+    }
+
+    private async Task<IEnumerable<IGrouping<ConnectionAddress, Subscription>>> GetSubscriptions(CancellationToken ct)
+    {
+        Subscription[] subs;
+
+        using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
+            subs = await db.Subscriptions.AsNoTracking().ToArrayAsync(ct);
+        }
+
+        await Parallel.ForEachAsync(subs, async (sub, ct) =>
+            sub.ResolvedServerAddresses = await Dns.GetHostAddressesAsync(sub.ServerAddress, ct));
+
+        return subs.GroupBy(x => new ConnectionAddress
+        {
+            Addresses = x.ResolvedServerAddresses!,
+            Port = x.ServerPort
+        }, ConnectionAddressComparer.Instance);
     }
 
     private async Task OnMessageDeleted(DiscordClient sender, MessageDeleteEventArgs args)

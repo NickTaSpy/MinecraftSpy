@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using System.Net;
 
 namespace MinecraftSpy.Test;
 
@@ -11,7 +12,7 @@ public class ServerPingTests
     {
         var data = JsonConvert.DeserializeObject<TestData>(File.ReadAllText("testData.json"));
 
-        var response = await _sut.Ping(data.IP, data.Port);
+        var response = await _sut.Ping(await Dns.GetHostAddressesAsync(data.Address), data.Port);
 
         Assert.NotNull(response);
         Assert.NotNull(response.Description);

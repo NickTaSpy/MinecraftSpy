@@ -1,4 +1,5 @@
 ﻿using Newtonsoft.Json;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
@@ -13,12 +14,12 @@ public sealed class MinecraftServerPing
     private readonly byte[] _buffer = new byte[short.MaxValue];
     private int _offset;
 
-    public async Task<PingPayload> Ping(string host, short port, CancellationToken ct = default)
+    public async Task<PingPayload> Ping(IPAddress[] addresses, short port, CancellationToken ct = default)
     {
         ClearBuffer();
 
         using var client = new TcpClient();
-        await client.ConnectAsync(host, port, ct);
+        await client.ConnectAsync(addresses, port, ct);
         ct.ThrowIfCancellationRequested();
         using var stream = client.GetStream();
 
