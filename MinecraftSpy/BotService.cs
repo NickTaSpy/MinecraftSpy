@@ -93,7 +93,7 @@ public sealed class BotService : BackgroundService
 
         _logger.LogInformation("Calculated {connCount} connections to ping.", subsPerConnection.Length);
 
-        await Parallel.ForEachAsync(subsPerConnection, ct, async (connSubs, ct) =>
+        await Task.WhenAll(subsPerConnection.Select(async connSubs =>
         {
             if (ct.IsCancellationRequested)
             {
@@ -110,7 +110,8 @@ public sealed class BotService : BackgroundService
                 }
                 catch (SocketException ex)
                 {
-                    _logger.LogError(ex, "Could not ping server. | Connection: {connection}", JsonConvert.SerializeObject(connSubs.Key));
+                    _logger.LogError(ex, "Could not ping server. | Addresses: {addresses} | Port: {port}",
+                        string.Join(", ", connSubs.Key.Addresses.Select(x => x.ToString())), connSubs.Key.Port);
                     return;
                 }
 
@@ -150,7 +151,7 @@ public sealed class BotService : BackgroundService
             catch (OperationCanceledException)
             {
             }
-        });
+        }));
 
         _logger.LogInformation("Finished pinging minecraft servers.");
     }
@@ -164,8 +165,7 @@ public sealed class BotService : BackgroundService
             subs = await db.Subscriptions.AsNoTracking().ToArrayAsync(ct);
         }
 
-        await Parallel.ForEachAsync(subs, async (sub, ct) =>
-            sub.ResolvedServerAddresses = await Dns.GetHostAddressesAsync(sub.ServerAddress, ct));
+        await Task.WhenAll(subs.Select(async sub => sub.ResolvedServerAddresses = await Dns.GetHostAddressesAsync(sub.ServerAddress, ct)));
 
         return subs.GroupBy(x => new ConnectionAddress
         {
