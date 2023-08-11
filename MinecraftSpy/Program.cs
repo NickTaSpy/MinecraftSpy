@@ -21,7 +21,6 @@ try
     Log.Information("Starting host");
 
     await Host.CreateDefaultBuilder()
-        .UseConsoleLifetime()
         .ConfigureServices((hostBuilder, services) =>
         {
             services.AddSingleton(hostBuilder.Configuration.GetSection("BotSettings").Get<Settings>() ?? new Settings());
@@ -49,6 +48,7 @@ try
 
             services.AddDbContextFactory<DatabaseContext>(options => options.UseMySql(secrets.BotDb, ServerVersion.AutoDetect(secrets.BotDb)));
 
+            services.AddHostedService<ConsoleCommandsService>();
             services.AddHostedService<BotService>();
         })
         .UseSerilog()
