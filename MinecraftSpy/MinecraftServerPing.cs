@@ -14,12 +14,17 @@ public sealed class MinecraftServerPing
     private readonly byte[] _buffer = new byte[short.MaxValue];
     private int _offset;
 
-    public async Task<PingPayload> Ping(IPAddress[] addresses, short port, CancellationToken ct = default)
+    public async Task<PingPayload> Ping(IPAddress[] addresses, short port, TimeSpan timeout, CancellationToken ct = default)
     {
         ClearBuffer();
 
         using var client = new TcpClient();
-        await client.ConnectAsync(addresses, port, ct);
+
+        using var timeoutCancellationToken = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCancellationToken.CancelAfter(timeout);
+
+        await client.ConnectAsync(addresses, port, timeoutCancellationToken.Token);
+
         ct.ThrowIfCancellationRequested();
         using var stream = client.GetStream();
 

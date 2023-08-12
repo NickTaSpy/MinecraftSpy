@@ -102,17 +102,19 @@ public sealed class BotService : BackgroundService
 
             try
             {
-                PingPayload? pingResult;
+                PingPayload? pingResult = null;
 
                 try
                 {
-                    pingResult = await new MinecraftServerPing().Ping(connSubs.Key.Addresses, connSubs.Key.Port, ct);
+                    pingResult = await new MinecraftServerPing().Ping(connSubs.Key.Addresses, connSubs.Key.Port, _settings.ServerPingTimeout, ct);
                 }
                 catch (SocketException ex)
                 {
-                    _logger.LogError(ex, "Could not ping server. | Addresses: {addresses} | Port: {port}",
-                        string.Join(", ", connSubs.Key.Addresses.Select(x => x.ToString())), connSubs.Key.Port);
-                    return;
+                    _logger.LogInformation("Could not ping server. | Reason: {reason} | Addresses: {addresses} | Port: {port}",
+                        ex.SocketErrorCode, string.Join(", ", connSubs.Key.Addresses.Select(x => x.ToString())), connSubs.Key.Port);
+                }
+                catch (OperationCanceledException)
+                {
                 }
 
                 foreach (var sub in connSubs)
